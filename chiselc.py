@@ -60,7 +60,8 @@ class Package(object):
     return field_contents
 
 class PackageCollection(object):
-  """
+  """Abstract base class for package collections, a listing of installed
+  packages. 
   """
   def __init__(self, collection_dir):
     self.collection_dir = collection_dir
@@ -75,9 +76,42 @@ class PackageCollection(object):
     else:
       assert False
 
+class PortageInstalledPackage(Package):
+  """Installed package for Portage.
+  """
+  def get_package(self, package_name):
+    """Returns the argument package as a Package object, or None if it doesn't 
+    exist.
+    """
+    pass
+      
+class PortagePkgList(PackageCollection):
+  """Package collection for Portage, usually under /var/db/pkg.
+  """
+  def __init__(self, package_definition_filepath):
+    pass
+  
+  def get_pkgname(self):
+    pass
+  
+  def get_name(self):
+    pass
+  
+  def get_version(self):
+    pass
+  
+  def get_dependencies(self):
+    pass
+  
+  def get_field(self, fieldname, include_private=True):
+    pass
+  
+
 if __name__ == "__main__":
   logging.basicConfig(level=logging.DEBUG)
   logger = logging.getLogger(__name__)
+  
+  print(sys.argv)
   
   parser = argparse.ArgumentParser(description="Chisel compiler wrapper script")
   parser.add_argument('sourceDirs', nargs='+',
@@ -88,7 +122,9 @@ if __name__ == "__main__":
                       help="""directory with package definition files and 
                               contents, used when resolving dependencies""")
   parser.add_argument('--pkgName', help="package name")
-  parser.add_argument('--dependencies', nargs='+', help="list of dependencies")
+  parser.add_argument('--dependencies', nargs='*', help="list of dependencies")
+  parser.add_argument('--scalacOpts', nargs='+', 
+                      help="list of arguments to pass to scalac")
   parser.add_argument('--outputJar', default=None,
                       help="filename and path of output JAR")
 
@@ -96,9 +132,10 @@ if __name__ == "__main__":
 
   pkgs_dir = os.path.abspath(args.pkgsDir)
 
-  packages = PackageCollection(pkgs_dir)
+  package_collection = PackageCollection(pkgs_dir)
+  packages = []
   # TODO remove hardcoded, use pkgname / dependencies
-  package = packages.get_package('chisel')
+  # package = packages.get_package('chisel')
   # TODO allow specifying dependencies instead
 
   # Get all the source files
@@ -112,28 +149,35 @@ if __name__ == "__main__":
   scalac_args = ['scalac']
   scalac_args.extend(source_files)
   scalac_args.extend(['-d', os.path.abspath(args.buildDir)])
-  
-  scalacopts = package.get_field_recursive('scalacopts')
+
+  scalacopts = []  
+  for package in packages:
+    scalacopts.extend(package.get_field_recursive('scalacopts'))
+  scalacopts.extend(args.scalacOpts)
+  scalacopts = ["-" + scalacopt for scalacopt in scalacopts]
   if scalacopts:
     logging.debug("Using scalacopts: %s", scalacopts)
     scalac_args.extend(scalacopts)
     
   # TODO: support Windows OS (uses semicolon for classpath separator)
-  classpaths = package.get_field_recursive('classpath')
-  classpaths = [os.path.join(pkgs_dir, classpath) for classpath in classpaths]
-  classpath_str = ':'.join(classpaths)
-  if classpath:
+  classpaths = ['/usr/share/java/junit4.jar', '/usr/share/java/scalatest_2.10-2.2.4.jar']
+  #classpaths = []
+  for package in packages:
+    classpaths.extend(package.get_field_recursive('classpath'))
+  if classpaths:    
+    classpaths = [os.path.join(pkgs_dir, classpath) for classpath in classpaths]
+    classpath_str = ':'.join(classpaths)
+  
     logging.debug("Using classpath: %s", classpath_str)
     scalac_args.extend(['-classpath', classpath_str])
   
   logging.info("Running scalac")
-  #scalac_returncode = subprocess.call(scalac_args)
-  scalac_returncode = 0
+  scalac_returncode = subprocess.call(scalac_args)
   logging.info("scalac done")
   
   if scalac_returncode != 0:
     logging.error("scalac returned nonzero return code: %i", scalac_returncode)
-    sys.exit()
+    sys.exit(1)
   
   # Create output JAR
   if args.outputJar:
@@ -155,5 +199,5 @@ if __name__ == "__main__":
 
     if jar_returncode != 0:
       logging.error("jar returned nonzero return code: %i", jar_returncode)
-      sys.exit()
+      sys.exit(1)
     
