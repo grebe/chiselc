@@ -49,7 +49,7 @@ class Package(object):
       for dep in dependency_package.get_dependencies():
         if dep.get_pkgname() not in seen:
           seen.add(dep.get_pkgname())
-          fringe.push(dep)
+          fringe.append(dep)
     return field_contents
 
 class PackageCollection(object):
@@ -144,7 +144,7 @@ if __name__ == "__main__":
   parser.add_argument('--portagePkgJarDir',
                       help="""directory where installed Chisel package jars are
                               stored""")
-  parser.add_argument('--scalacOpts', nargs='+', 
+  parser.add_argument('--scalacOpts', nargs='*', 
                       help="""list of arguments to pass to scalac, in addition
                       to those specified by dependencies""")
   parser.add_argument('--outputJar', default=None,
