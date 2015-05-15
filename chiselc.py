@@ -86,6 +86,21 @@ class PortageInstalledPackage(Package):
       logging.error("Package '%s' isn't installed (can't find %s)", 
                     package_name, self.pkgdb_path)
       sys.exit(1)
+    
+    self.ebuild_vars = {}
+    ebuild_filepath = os.path.join(self.pkglist.pkgdb_path, self.package_name,
+                                   self.get_noncategory_pkgname() + ".ebuild")
+    with open(ebuild_filepath, "r") as ebuild_file:
+      for ebuild_line in ebuild_file:
+        match = re.match(r'^\s*([^=\s])+\s*=\s*"([^"]*)\s*$"', ebuild_line)
+        if match:
+          var_name = match.group(1)
+          if var_name in self.ebuild_vars:
+            logging.error("Package '%s' has variable '%s' defined twice", 
+                          package_name, var_name)
+            sys.exit(1)            
+          self.ebuild_vars[var_name] = match.group(2).split()
+
     # TODO: add versioning constraints, defaulting at least
     # right now, assume version is specified as part of package name
   
@@ -98,6 +113,11 @@ class PortageInstalledPackage(Package):
       return self.get_pkgname()[sep+1:]  
   
   def get_dependencies(self):
+    if 'CHISEL_LIBRARY_DEPENDENCIES' in self.ebuild_vars:
+      return self.ebuild_vars['CHISEL_LIBRARY_DEPENDENCIES']
+    else:
+      return []
+      
     depends_filepath = os.path.join(self.pkglist.pkgdb_path, self.package_name,
                                     "DEPEND")
     if not os.path.exists(depends_filepath):
@@ -111,17 +131,9 @@ class PortageInstalledPackage(Package):
       return [os.path.join(self.pkglist.pkgjar_path, 
                            self.get_noncategory_pkgname() + ".jar")]
     elif fieldname == 'scalacopts': 
-      ebuild_filepath = os.path.join(self.pkglist.pkgdb_path, self.package_name,
-                                     self.get_noncategory_pkgname() + ".ebuild")
-      if not os.path.exists(ebuild_filepath):
-        logging.error("Package '%s' missing ebuild file %s", 
-                      self.package_name, ebuild_filepath)
-        sys.exit(1)
-      with open(ebuild_filepath, "r") as ebuild_file:
-        for ebuild_line in ebuild_file:
-          match = re.match(r'^\s*SCALACOPTS\s*=\s*"([^"]*)\s*$"', ebuild_line)
-          if match:
-            return match.group(1).split()
+      if 'SCALACOPTS' in self.ebuild_vars:
+        return self.ebuild_vars['SCALACOPTS']
+      else:
         return []
     else:
       raise NotImplementedError("Unknown field '%s'" % fieldname)
