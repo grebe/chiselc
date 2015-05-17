@@ -161,6 +161,8 @@ if __name__ == "__main__":
                       to those specified by dependencies""")
   parser.add_argument('--outputJar', default=None,
                       help="filename and path of output JAR")
+  parser.add_argument('--jarEntryPoint', default=None,
+                      help="entrypoint / Main-Class for the JAR")  
 
   args = parser.parse_args()
 
@@ -230,7 +232,11 @@ if __name__ == "__main__":
     logging.debug("Class files: %s", class_files)
     #TODO: check for empty class files
     
-    jar_args = ['jar', 'cf', os.path.abspath(args.outputJar)]
+    if args.jarEntryPoint:
+      jar_args = ['jar', 'cfe', os.path.abspath(args.outputJar),
+                  args.jarEntryPoint]
+    else:
+      jar_args = ['jar', 'cf', os.path.abspath(args.outputJar)]
     jar_args.extend(class_files)
     
     logging.info("Running jar")
