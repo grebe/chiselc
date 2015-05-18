@@ -168,7 +168,7 @@ if __name__ == "__main__":
                             scanned recursively""")
   parser.add_argument('buildDir', 
                       help="working directory to place build output files")
-  parser.add_argument('--resourceDirs', nargs='*',
+  parser.add_argument('--resourceDirs', nargs='*', default=[],
                       help="""list of resource directories, the contents of 
                               which are copied into the resulting JAR""")
   parser.add_argument('--portagePkgDepends',
@@ -213,6 +213,7 @@ if __name__ == "__main__":
     logging.debug("Added classpath for '%s': %s", 
                   package.get_pkgname(), package_classpaths)
 
+  # TODO: perhaps require that this directory is empty?
   if not os.path.exists(compile_dir):
     os.makedirs(compile_dir)
 
@@ -274,7 +275,7 @@ if __name__ == "__main__":
   if args.outputJar: 
     class_files = []
     for root, _, filenames in os.walk(compile_dir):
-      for filename in fnmatch.filter(filenames, '*.class'):
+      for filename in filenames:
         class_files.append(os.path.relpath(os.path.join(root, filename),
                                            compile_dir))
     logging.info("Found %i class files", len(class_files))
