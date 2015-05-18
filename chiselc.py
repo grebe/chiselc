@@ -37,22 +37,6 @@ class Package(object):
   def get_field(self, fieldname, include_private=True):
     """Returns the value of an arbitrary field"""
     raise NotImplementedError()
-    
-  def get_field_recursive(self, fieldname):
-    # do a BFS over dependencies
-    fringe = self.get_dependencies()
-    field_contents = self.get_field(fieldname, True)
-    seen = set()
-    while fringe:
-      dependency_package = fringe.pop(0)
-      
-      field_contents.extend(dependency_package.get_field(fieldname, False))
-      
-      for dep in dependency_package.get_dependencies():
-        if dep.get_pkgname() not in seen:
-          seen.add(dep.get_pkgname())
-          fringe.append(dep)
-    return field_contents
 
 class PackageCollection(object):
   """Abstract base class for package collections, a listing of installed
@@ -128,16 +112,10 @@ class PortageInstalledPackage(Package):
       depends_list = parse_portage_depends(depends_file.read())
       return [self.pkglist.get_package(package_name) for package_name in depends_list]
   
-  def get_field(self, fieldname, include_private=True):
-    # TODO: can recursive scalacopts be removed?
+  def get_field(self, fieldname):
     if fieldname == 'classpath':
       return [os.path.join(self.pkglist.pkgjar_path, 
                            self.get_noncategory_pkgname() + ".jar")]
-    elif fieldname == 'scalacopts': 
-      if 'SCALACOPTS' in self.ebuild_vars:
-        return self.ebuild_vars['SCALACOPTS']
-      else:
-        return []
     else:
       raise NotImplementedError("Unknown field '%s'" % fieldname)
 
@@ -181,7 +159,7 @@ if __name__ == "__main__":
   parser.add_argument('--portagePkgJarDir',
                       help="""directory where installed Chisel package jars are
                               stored""")
-  parser.add_argument('--scalacOpts', nargs='*', 
+  parser.add_argument('--scalacOpts', nargs='*',  default=[],
                       help="""list of arguments to pass to scalac, in addition
                       to those specified by dependencies""")
   parser.add_argument('--outputJar', default=None,
@@ -209,7 +187,7 @@ if __name__ == "__main__":
   # TODO: support Windows OS (uses semicolon for classpath separator)
   classpaths = []
   for package in packages:
-    package_classpaths = package.get_field_recursive('classpath')
+    package_classpaths = package.get_field('classpath')
     classpaths.extend(package_classpaths)
     logging.debug("Added classpath for '%s': %s", 
                   package.get_pkgname(), package_classpaths)
@@ -246,10 +224,7 @@ if __name__ == "__main__":
   scalac_args.extend(source_files)
   scalac_args.extend(['-d', os.path.abspath(compile_dir)])
 
-  scalacopts = []  
-  for package in packages:
-    scalacopts.extend(package.get_field_recursive('scalacopts'))
-  scalacopts.extend(args.scalacOpts)
+  scalacopts = args.scalacOpts
   scalacopts = ["-" + scalacopt for scalacopt in scalacopts]
   if scalacopts:
     logging.debug("Using scalacopts: %s", scalacopts)
