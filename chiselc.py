@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import errno
 import fnmatch
 import logging
 import os
@@ -139,6 +140,24 @@ class PortageInstalledPackage(Package):
     else:
       raise NotImplementedError("Unknown field '%s'" % fieldname)
 
+def copy_dir(src, dst):
+  """Copies the contents of the directory src and places them in an already
+  existing directory dst."""
+  assert os.path.exists(src)
+  assert os.path.exists(dst)
+  
+  for filename in os.listdir(src):
+    try:
+      # TODO: check and ensure dst does not exist?
+      shutil.copytree(os.path.join(src, filename), 
+                      os.path.join(dst, filename))
+    except OSError as e:
+      if e.errno == errno.ENOTDIR:
+        shutil.copy(os.path.join(src, filename), 
+                    os.path.join(dst, filename))
+      else:
+        raise e
+
 if __name__ == "__main__":
   logging.basicConfig(level=logging.DEBUG)
   logger = logging.getLogger(__name__)
@@ -149,6 +168,9 @@ if __name__ == "__main__":
                             scanned recursively""")
   parser.add_argument('buildDir', 
                       help="working directory to place build output files")
+  parser.add_argument('--resourceDirs', nargs='*',
+                      help="""list of resource directories, the contents of 
+                              which are copied into the resulting JAR""")
   parser.add_argument('--portagePkgDepends',
                       help="""Portage DEPENDS-style list of dependencies""")
   parser.add_argument('--portagePkgDbDir',
@@ -205,6 +227,10 @@ if __name__ == "__main__":
       if jar_returncode != 0:
         logging.error("jar returned nonzero return code: %i", jar_returncode)
         sys.exit(1)
+
+  for resource_dir in args.resourceDirs:
+    logging.info("Copying resources in %s", resource_dir)
+    copy_dir(resource_dir, compile_dir)
 
   # Get all the source files
   source_files = []
