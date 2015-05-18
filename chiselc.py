@@ -129,6 +129,7 @@ class PortageInstalledPackage(Package):
       return [self.pkglist.get_package(package_name) for package_name in depends_list]
   
   def get_field(self, fieldname, include_private=True):
+    # TODO: can recursive scalacopts be removed?
     if fieldname == 'classpath':
       return [os.path.join(self.pkglist.pkgjar_path, 
                            self.get_noncategory_pkgname() + ".jar")]
