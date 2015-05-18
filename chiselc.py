@@ -138,7 +138,7 @@ def copy_dir(src, dst):
         raise e
 
 if __name__ == "__main__":
-  logging.basicConfig(level=logging.DEBUG)
+  logging.basicConfig(level=logging.INFO)
   logger = logging.getLogger(__name__)
   
   parser = argparse.ArgumentParser(description="Chisel compiler wrapper script")
@@ -159,6 +159,11 @@ if __name__ == "__main__":
   parser.add_argument('--portagePkgJarDir',
                       help="""directory where installed Chisel package jars are
                               stored""")
+  parser.add_argument('--classpath', nargs='*', default=[],
+                      help="""dependency JARs to add to the classpath; those 
+                              sharing the same name as a dependency JAR 
+                              specified by the package manager will take 
+                              priority""")
   parser.add_argument('--scalacOpts', nargs='*',  default=[],
                       help="""list of arguments to pass to scalac, in addition
                       to those specified by dependencies""")
@@ -172,7 +177,7 @@ if __name__ == "__main__":
 
   args = parser.parse_args()
 
-  compile_dir = os.path.join(args.buildDir, "chiselc")
+  compile_dir = args.buildDir
 
   package_collection = PortagePkgList(args.portagePkgDbDir, 
                                       args.portagePkgJarDir)
@@ -184,13 +189,26 @@ if __name__ == "__main__":
   for dep_pkgname in package_dependencies:
     packages.append(package_collection.get_package(dep_pkgname))
 
-  # TODO: support Windows OS (uses semicolon for classpath separator)
-  classpaths = []
+  
+  package_classpaths = []
   for package in packages:
-    package_classpaths = package.get_field('classpath')
-    classpaths.extend(package_classpaths)
+    package_classpath = package.get_field('classpath')
+    package_classpaths.extend(package_classpath)
     logging.debug("Added classpath for '%s': %s", 
-                  package.get_pkgname(), package_classpaths)
+                  package.get_pkgname(), package_classpath)
+    
+  # Add override classpaths from command line arguments
+  classpaths = []
+  classpaths_args_basenames = [os.path.basename(classpath) 
+                               for classpath in args.classpath] 
+  for package_classpath in package_classpaths:
+    if os.path.basename(package_classpath) in classpaths_args_basenames:
+      logging.info("Dropping package classpath %s (overridden by --classpath argument)", package_classpath)
+    else:
+      classpaths.append(package_classpath)
+    
+  classpaths.extend([os.path.abspath(classpath) 
+                     for classpath in args.classpath])
 
   # TODO: perhaps require that this directory is empty?
   if not os.path.exists(compile_dir):
@@ -203,7 +221,7 @@ if __name__ == "__main__":
       jar_args = ['jar', 'xf', classpathJar]
       logging.info("Extracting dependency %s with jar", classpathJar)
       jar_returncode = subprocess.call(jar_args, cwd=compile_dir)
-      logging.info("Extraction done")
+      logging.debug("Extraction done")
       if jar_returncode != 0:
         logging.error("jar returned nonzero return code: %i", jar_returncode)
         sys.exit(1)
@@ -234,6 +252,7 @@ if __name__ == "__main__":
     for classpath in classpaths:
       if not os.path.exists(classpath):
         logging.error("Required classpath %s doesn't exist", classpath)
+    # TODO: support Windows OS (uses semicolon for classpath separator)
     classpath_str = ':'.join(classpaths)
   
     logging.debug("Using classpath: %s", classpath_str)
@@ -241,7 +260,7 @@ if __name__ == "__main__":
   
   logging.info("Running scalac")
   scalac_returncode = subprocess.call(scalac_args)
-  logging.info("scalac done")
+  logging.debug("scalac done")
   
   if scalac_returncode != 0:
     logging.error("scalac returned nonzero return code: %i", scalac_returncode)
@@ -267,7 +286,7 @@ if __name__ == "__main__":
     
     logging.info("Running jar")
     jar_returncode = subprocess.call(jar_args, cwd=compile_dir)
-    logging.info("jar done")
+    logging.debug("jar done")
 
     if jar_returncode != 0:
       logging.error("jar returned nonzero return code: %i", jar_returncode)
