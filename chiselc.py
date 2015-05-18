@@ -5,6 +5,7 @@ import fnmatch
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -146,7 +147,8 @@ if __name__ == "__main__":
   parser.add_argument('sourceDirs', nargs='+',
                       help="""list of source directories containing Chisel code,
                             scanned recursively""")
-  parser.add_argument('buildDir', help="directory to place build output files")
+  parser.add_argument('buildDir', 
+                      help="working directory to place build output files")
   parser.add_argument('--portagePkgDepends',
                       help="""Portage DEPENDS-style list of dependencies""")
   parser.add_argument('--portagePkgDbDir',
@@ -161,10 +163,15 @@ if __name__ == "__main__":
                       to those specified by dependencies""")
   parser.add_argument('--outputJar', default=None,
                       help="filename and path of output JAR")
+  parser.add_argument('--linkJars', type=bool, default=True,
+                      help="""incorporate the contents of dependency JARs into
+                              the output JAR""")  
   parser.add_argument('--jarEntryPoint', default=None,
                       help="entrypoint / Main-Class for the JAR")  
 
   args = parser.parse_args()
+
+  compile_dir = os.path.join(args.buildDir, "chiselc")
 
   package_collection = PortagePkgList(args.portagePkgDbDir, 
                                       args.portagePkgJarDir)
@@ -176,6 +183,29 @@ if __name__ == "__main__":
   for dep_pkgname in package_dependencies:
     packages.append(package_collection.get_package(dep_pkgname))
 
+  # TODO: support Windows OS (uses semicolon for classpath separator)
+  classpaths = []
+  for package in packages:
+    package_classpaths = package.get_field_recursive('classpath')
+    classpaths.extend(package_classpaths)
+    logging.debug("Added classpath for '%s': %s", 
+                  package.get_pkgname(), package_classpaths)
+
+  if not os.path.exists(compile_dir):
+    os.makedirs(compile_dir)
+
+  if args.linkJars and args.outputJar:
+    # Extract all dependency JARs to working directory
+    # TODO: check for conflicting files
+    for classpathJar in classpaths:
+      jar_args = ['jar', 'xf', classpathJar]
+      logging.info("Extracting dependency %s with jar", classpathJar)
+      jar_returncode = subprocess.call(jar_args, cwd=compile_dir)
+      logging.info("Extraction done")
+      if jar_returncode != 0:
+        logging.error("jar returned nonzero return code: %i", jar_returncode)
+        sys.exit(1)
+
   # Get all the source files
   source_files = []
   for source_dir in args.sourceDirs:
@@ -186,7 +216,7 @@ if __name__ == "__main__":
   
   scalac_args = ['scalac']
   scalac_args.extend(source_files)
-  scalac_args.extend(['-d', os.path.abspath(args.buildDir)])
+  scalac_args.extend(['-d', os.path.abspath(compile_dir)])
 
   scalacopts = []  
   for package in packages:
@@ -196,14 +226,7 @@ if __name__ == "__main__":
   if scalacopts:
     logging.debug("Using scalacopts: %s", scalacopts)
     scalac_args.extend(scalacopts)
-    
-  # TODO: support Windows OS (uses semicolon for classpath separator)
-  classpaths = []
-  for package in packages:
-    package_classpaths = package.get_field_recursive('classpath')
-    classpaths.extend(package_classpaths)
-    logging.debug("Added classpath for '%s': %s", 
-                  package.get_pkgname(), package_classpaths)
+  
   if classpaths:
     for classpath in classpaths:
       if not os.path.exists(classpath):
@@ -222,12 +245,12 @@ if __name__ == "__main__":
     sys.exit(1)
   
   # Create output JAR
-  if args.outputJar:
+  if args.outputJar: 
     class_files = []
-    for root, _, filenames in os.walk(args.buildDir):
+    for root, _, filenames in os.walk(compile_dir):
       for filename in fnmatch.filter(filenames, '*.class'):
         class_files.append(os.path.relpath(os.path.join(root, filename),
-                                           args.buildDir))
+                                           compile_dir))
     logging.info("Found %i class files", len(class_files))
     logging.debug("Class files: %s", class_files)
     #TODO: check for empty class files
@@ -240,7 +263,7 @@ if __name__ == "__main__":
     jar_args.extend(class_files)
     
     logging.info("Running jar")
-    jar_returncode = subprocess.call(jar_args, cwd=args.buildDir)
+    jar_returncode = subprocess.call(jar_args, cwd=compile_dir)
     logging.info("jar done")
 
     if jar_returncode != 0:
