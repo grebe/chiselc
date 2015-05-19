@@ -137,7 +137,10 @@ def copy_dir(src, dst):
       else:
         raise e
 
-if __name__ == "__main__":
+def main(args=None):
+  if args is None:
+    args = sys.argv[1:]
+
   logging.basicConfig(level=logging.INFO)
   logger = logging.getLogger(__name__)
 
@@ -175,7 +178,7 @@ if __name__ == "__main__":
   parser.add_argument('--jarEntryPoint', default=None,
                       help="entrypoint / Main-Class for the JAR")
 
-  args = parser.parse_args()
+  args = parser.parse_args(args)
 
   compile_dir = args.buildDir
 
@@ -291,3 +294,6 @@ if __name__ == "__main__":
     if jar_returncode != 0:
       logging.error("jar returned nonzero return code: %i", jar_returncode)
       sys.exit(1)
+
+if __name__=="__main__":
+  main()
