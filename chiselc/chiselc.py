@@ -10,114 +10,88 @@ import shutil
 import subprocess
 import sys
 
-def parse_portage_depends(depends_string):
-  depends_list = depends_string.split()
-  out_list = []
-  for depend in depends_list:
-    # for now, require an explicit version to make implementation easier
-    if not depend.startswith('='):
-      raise NotImplementedError("Portage dependencies must have versions explicitly specified, '%s' is not yet supported" % depend)
-    out_list.append(depend[1:])
-  return out_list
+import conda.config
+import conda.misc
 
-class Package(object):
-  """A package definition object
-  """
-  def get_pkgname(self):
-    """Returns the package name, a globally unique identifier which consists of
-    the name and the version number.
-    """
-    raise NotImplementedError()
+conda_meta_prefix = conda.config.default_prefix+os.sep+'conda-meta'
+packages_available = conda.misc.walk_prefix(conda_meta_prefix)
+package_by_name={}
+for pack in packages_available:
+  package_by_name[pack.rsplit('-',2)[0]]=pack
 
-  def get_dependencies(self):
-    """Returns dependencies as a list of Packages.
-    """
-    raise NotImplementedError()
+def read_deps(package):
+  if package not in package_by_name:
+    return []
+  with open(conda_meta_prefix+os.sep+package_by_name[package]) as f:
+    import json
+    j = json.load(f)
+    depends = j['depends']
+    # these have version information too
+    # for now, assume that the only versions in the prefix have been pulled in for me
+    # and no other versions exist
+    depends = [j.split(' ')[0] for j in depends]
+  return depends
 
-  def get_field(self, fieldname, include_private=True):
-    """Returns the value of an arbitrary field"""
-    raise NotImplementedError()
+# TODO (very far future): support multiple package lists
+def resolve_dependencies(packages):
+  # do a BFS for dependencies
+  this_layer = packages
+  next_layer = []
+  found = []
+  while this_layer:
+    for pack in this_layer:
+      if pack in found:
+        continue
+      found.append(pack)
+      dep = read_deps(pack)
+      if dep is not None:
+        next_layer += dep
+    this_layer = next_layer
+    next_layer = []
+  return found
 
-class PackageCollection(object):
-  """Abstract base class for package collections, a listing of installed
-  packages.
-  """
-  def get_package(self, package_name):
-    """Returns the argument package as a Package object, or None if it doesn't
-    exist.
-    """
-    raise NotImplementedError()
+# from conda/cli/main_package.py
+def list_package_jars(pkg_name=None):
+  import os
+  import re
+  import conda.config as config
+  from conda.misc import walk_prefix
 
-class PortagePkgList(PackageCollection):
-  """Installed package for Portage.
-  """
-  def __init__(self, pkgdb_path, pkgjar_path):
-    self.pkgdb_path = pkgdb_path
-    self.pkgjar_path = pkgjar_path
+  if pkg_name.endswith('.jar'):
+    return [os.path.abspath(pkg_name)]
 
-  def get_package(self, package_name):
-    """Returns the argument package as a Package object, or None if it doesn't
-    exist.
-    """
-    return PortageInstalledPackage(self, package_name)
+  pkgs_dirs = config.pkgs_dirs[0]
+  all_dir_names = []
+  pattern = re.compile(pkg_name, re.I)
 
-class PortageInstalledPackage(Package):
-  """Package collection for Portage, usually under /var/db/pkg.
-  """
-  def __init__(self, pkglist, package_name):
-    self.pkglist = pkglist
-    self.package_name = package_name
-    self.pkgdb_path = os.path.join(pkglist.pkgdb_path, package_name)
-    if not os.path.isdir(self.pkgdb_path):
-      logging.error("Package '%s' isn't installed (can't find %s)",
-                    package_name, self.pkgdb_path)
-      sys.exit(1)
+  print('\nINFO: The location for available packages: %s' % (pkgs_dirs))
 
-    self.ebuild_vars = {}
-    ebuild_filepath = os.path.join(self.pkglist.pkgdb_path, self.package_name,
-                                   self.get_noncategory_pkgname() + ".ebuild")
-    with open(ebuild_filepath, "r") as ebuild_file:
-      for ebuild_line in ebuild_file:
-        match = re.match(r'^\s*([^=\s])+\s*=\s*"([^"]*)\s*$"', ebuild_line)
-        if match:
-          var_name = match.group(1)
-          if var_name in self.ebuild_vars:
-            logging.error("Package '%s' has variable '%s' defined twice",
-                          package_name, var_name)
-            sys.exit(1)
-          self.ebuild_vars[var_name] = match.group(2).split()
+  for dir in os.listdir(pkgs_dirs):
+    ignore_dirs = [ '_cache-0.0-x0', 'cache' ]
 
-    # TODO: add versioning constraints, defaulting at least
-    # right now, assume version is specified as part of package name
+    if dir in ignore_dirs:
+      continue
 
-  def get_pkgname(self):
-    return self.package_name
+    if not os.path.isfile(pkgs_dirs+os.sep+dir):
+      match = pattern.match(dir)
 
-  def get_noncategory_pkgname(self):
-      sep = self.get_pkgname().rfind("/")
-      # TODO: error checking here
-      return self.get_pkgname()[sep+1:]
+      if match:
+        all_dir_names.append(dir)
 
-  def get_dependencies(self):
-    if 'CHISEL_LIBRARY_DEPENDENCIES' in self.ebuild_vars:
-      return self.ebuild_vars['CHISEL_LIBRARY_DEPENDENCIES']
-    else:
-      return []
+  num_of_all_dir_names = len(all_dir_names)
+  dir_num_width = len(str(num_of_all_dir_names))
 
-    depends_filepath = os.path.join(self.pkglist.pkgdb_path, self.package_name,
-                                    "DEPEND")
-    if not os.path.exists(depends_filepath):
-      return []
-    with open(depends_filepath, "r") as depends_file:
-      depends_list = parse_portage_depends(depends_file.read())
-      return [self.pkglist.get_package(package_name) for package_name in depends_list]
+  if num_of_all_dir_names == 0:
+    print("\n\tWARN: There is NO '%s' package.\n" % (pkg_name))
+    return 1
+  elif num_of_all_dir_names >= 2:
+    print("\n\tWARN: Ambiguous package name ('%s')\n" % (pkg_name))
 
-  def get_field(self, fieldname):
-    if fieldname == 'classpath':
-      return [os.path.join(self.pkglist.pkgjar_path,
-                           self.get_noncategory_pkgname() + ".jar")]
-    else:
-      raise NotImplementedError("Unknown field '%s'" % fieldname)
+  full_pkg_name = all_dir_names[0]
+  pkg_dir = pkgs_dirs+os.sep+full_pkg_name
+  ret = walk_prefix(pkg_dir, ignore_predefined_files=False)
+  return [pkg_dir + os.sep + i for i in ret if i.endswith('.jar')]
+
 
 def copy_dir(src, dst):
   """Copies the contents of the directory src and places them in an already
@@ -145,33 +119,27 @@ def main(args=None):
   logger = logging.getLogger(__name__)
 
   parser = argparse.ArgumentParser(description="Chisel compiler wrapper script")
-  parser.add_argument('sourceDirs', nargs='+',
+  parser.add_argument('sourceDirs', nargs='+', default='src/main/scala',
                       help="""list of source directories containing Chisel code,
                             scanned recursively""")
-  parser.add_argument('buildDir',
-                      help="working directory to place build output files")
   parser.add_argument('--resourceDirs', nargs='*', default=[],
                       help="""list of resource directories, the contents of
                               which are copied into the resulting JAR""")
-  parser.add_argument('--portagePkgDepends',
-                      help="""Portage DEPENDS-style list of dependencies""")
-  parser.add_argument('--portagePkgDbDir',
-                      help="""directory with Portage installed package
-                              definition files and contents, used when resolving
-                              dependencies""")
-  parser.add_argument('--portagePkgJarDir',
-                      help="""directory where installed Chisel package jars are
-                              stored""")
   parser.add_argument('--classpath', nargs='*', default=[],
                       help="""dependency JARs to add to the classpath; those
                               sharing the same name as a dependency JAR
                               specified by the package manager will take
                               priority""")
-  parser.add_argument('--scalacOpts', nargs='*',  default=[],
+  parser.add_argument('--scalacOpts', nargs='*',  default=['deprecation', 'feature',
+                                                           'language:reflectiveCalls',
+                                                           'language:implicitConversions',
+                                                           'language:existentials'],
                       help="""list of arguments to pass to scalac, in addition
                       to those specified by dependencies""")
-  parser.add_argument('--outputJar', default=None,
+  parser.add_argument('-o', '--outputJar', default=None,
                       help="filename and path of output JAR")
+  parser.add_argument('-l', '--link', default=None, action='append',
+                      help=""""GCC style link against a conda package""")
   parser.add_argument('--linkJars', type=bool, default=True,
                       help="""incorporate the contents of dependency JARs into
                               the output JAR""")
@@ -180,25 +148,16 @@ def main(args=None):
 
   args = parser.parse_args(args)
 
-  compile_dir = args.buildDir
-
-  package_collection = PortagePkgList(args.portagePkgDbDir,
-                                      args.portagePkgJarDir)
-  packages = []
-
-  # TODO (very far future): support multiple package lists
-  package_dependencies = parse_portage_depends(args.portagePkgDepends)
-  logging.debug("Found immediate dependencies: %s", package_dependencies)
-  for dep_pkgname in package_dependencies:
-    packages.append(package_collection.get_package(dep_pkgname))
-
+  packages = args.link
+  packages_plus_depends = resolve_dependencies(packages)
+  logging.debug("Packages including dependencies: %s", packages_plus_depends)
 
   package_classpaths = []
   for package in packages:
-    package_classpath = package.get_field('classpath')
+    package_classpath = list_package_jars(package)
     package_classpaths.extend(package_classpath)
     logging.debug("Added classpath for '%s': %s",
-                  package.get_pkgname(), package_classpath)
+                  package, package_classpath)
 
   # Add override classpaths from command line arguments
   classpaths = []
@@ -213,25 +172,6 @@ def main(args=None):
   classpaths.extend([os.path.abspath(classpath)
                      for classpath in args.classpath])
 
-  # TODO: perhaps require that this directory is empty?
-  if not os.path.exists(compile_dir):
-    os.makedirs(compile_dir)
-
-  if args.linkJars and args.outputJar:
-    # Extract all dependency JARs to working directory
-    # TODO: check for conflicting files
-    for classpathJar in classpaths:
-      jar_args = ['jar', 'xf', classpathJar]
-      logging.info("Extracting dependency %s with jar", classpathJar)
-      jar_returncode = subprocess.call(jar_args, cwd=compile_dir)
-      logging.debug("Extraction done")
-      if jar_returncode != 0:
-        logging.error("jar returned nonzero return code: %i", jar_returncode)
-        sys.exit(1)
-
-  for resource_dir in args.resourceDirs:
-    logging.info("Copying resources in %s", resource_dir)
-    copy_dir(resource_dir, compile_dir)
 
   # Get all the source files
   source_files = []
@@ -243,7 +183,6 @@ def main(args=None):
 
   scalac_args = ['scalac']
   scalac_args.extend(source_files)
-  scalac_args.extend(['-d', os.path.abspath(compile_dir)])
 
   scalacopts = args.scalacOpts
   scalacopts = ["-" + scalacopt for scalacopt in scalacopts]
@@ -261,6 +200,9 @@ def main(args=None):
     logging.debug("Using classpath: %s", classpath_str)
     scalac_args.extend(['-classpath', classpath_str])
 
+  if args.outputJar:
+    scalac_args.extend(['-d', os.path.abspath(args.outputJar)])
+
   logging.info("Running scalac")
   scalac_returncode = subprocess.call(scalac_args)
   logging.debug("scalac done")
@@ -269,26 +211,14 @@ def main(args=None):
     logging.error("scalac returned nonzero return code: %i", scalac_returncode)
     sys.exit(1)
 
-  # Create output JAR
-  if args.outputJar:
-    class_files = []
-    for root, _, filenames in os.walk(compile_dir):
-      for filename in filenames:
-        class_files.append(os.path.relpath(os.path.join(root, filename),
-                                           compile_dir))
-    logging.info("Found %i class files", len(class_files))
-    logging.debug("Class files: %s", class_files)
-    #TODO: check for empty class files
-
-    if args.jarEntryPoint:
-      jar_args = ['jar', 'cfe', os.path.abspath(args.outputJar),
-                  args.jarEntryPoint]
-    else:
-      jar_args = ['jar', 'cf', os.path.abspath(args.outputJar)]
-    jar_args.extend(class_files)
-
+  # Add resources
+  for resource_dir in args.resourceDirs:
+    logging.info("Copying resources in %s", resource_dir)
+    jar_args = ['jar', 'uf', os.path.abspath(args.outputJar),  '-C', resource_dir]
     logging.info("Running jar")
-    jar_returncode = subprocess.call(jar_args, cwd=compile_dir)
+    for root, _, filenames in os.walk(resource_dir):
+      for filename in filenames:
+        jar_returncode = subprocess.call(jar_args + [filename])
     logging.debug("jar done")
 
     if jar_returncode != 0:
