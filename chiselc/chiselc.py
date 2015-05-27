@@ -60,7 +60,7 @@ def list_package_jars(pkg_name=None):
   if pkg_name.endswith('.jar'):
     return [os.path.abspath(pkg_name)]
 
-  pkgs_dirs = config.pkgs_dirs[0]
+  pkgs_dirs = config.pkgs_dir_from_envs_dir(conda.config.envs_dirs[0])#config.pkgs_dirs[0]
   all_dir_names = []
   pattern = re.compile(pkg_name, re.I)
 
@@ -138,7 +138,7 @@ def main(args=None):
                       to those specified by dependencies""")
   parser.add_argument('-o', '--outputJar', default=None,
                       help="filename and path of output JAR")
-  parser.add_argument('-l', '--link', default=None, action='append',
+  parser.add_argument('-l', '--link', default=[], action='append',
                       help=""""GCC style link against a conda package""")
   parser.add_argument('--linkJars', type=bool, default=True,
                       help="""incorporate the contents of dependency JARs into
