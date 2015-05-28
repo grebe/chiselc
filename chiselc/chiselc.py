@@ -153,7 +153,7 @@ def main(args=None):
   logging.debug("Packages including dependencies: %s", packages_plus_depends)
 
   package_classpaths = []
-  for package in packages:
+  for package in packages_plus_depends:
     package_classpath = list_package_jars(package)
     package_classpaths.extend(package_classpath)
     logging.debug("Added classpath for '%s': %s",
